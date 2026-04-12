@@ -5,8 +5,8 @@
   "issue_tracker": "https://github.com/MagicStarTrace/xiaomi_cloud/issues",
   "dependencies": [],
   "iot_class": "cloud_polling",
-  "version": "2025.4.22",
+  "version": "2026.03.06",
   "config_flow": true,
-  "codeowners": ["@magicStarTrace"],
+  "codeowners": ["@MagicStarTrace"],
   "requirements": []
 }

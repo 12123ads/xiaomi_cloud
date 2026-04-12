@@ -3,31 +3,44 @@
         "title": "Xiaomi Cloud",
         "step": {
             "user": {
-                "title": "Xiaomi Cloud",
-                "description": "If you need help with the configuration have a look here: https://github.com/MagicStarTrace/xiaomi-cloud",
+                "title": "Xiaomi Cloud Configuration",
+                "description": "Please configure the Xiaomi Cloud service connection.\n\nFor help with deployment, see:\nhttps://github.com/MagicStarTrace/xiaomi_cloud",
                 "data": {
-                    "password": "Password",
-                    "username": "Username"
+                    "endpoint": "Playwright Service URL",
+                    "username": "Xiaomi Account",
+                    "password": "Xiaomi Password",
+                    "gaode_api_key": "Gaode (Amap) API Key",
+                    "enable_gaode_more_info": "Show Gaode Map in device details (requires gaode_maps)"
                 }
             }
         },
         "error": {
-            "get_sign_failed": "Get sign failed",
-            "login_url_failed": "Login failed",
-            "login_mi_cloud_failed": "Login xiaomi cloud failed",
-            "get_device_failed": "Get device failed"
+            "already_configured": "This account is already configured.",
+            "base_url_required": "Playwright service URL cannot be empty.",
+            "invalid_url": "URL must start with http:// or https://",
+            "username_required": "Xiaomi account cannot be empty.",
+            "password_required": "Xiaomi password cannot be empty."
         },
         "abort": {
-            "single_instance_allowed": "Only a single configuration of Colorfulclouds Weather is allowed.",
-            "already_configured": "This is already configured."
+            "already_configured": "This account is already configured."
         }
     },
     "options": {
         "step": {
-            "user": {
+            "init": {
+                "title": "Xiaomi Cloud Options",
+                "description": "Configure location polling intervals and Gaode API.\n\nFor help with deployment, see:\nhttps://github.com/MagicStarTrace/xiaomi_cloud",
                 "data": {
-                    "scan_interval": "Scan interval",
-                    "coordinate_type": "Coordinate type"
+                    "endpoint": "Playwright Service URL",
+                    "username": "Xiaomi Account",
+                    "password": "Xiaomi Password",
+                    "update_interval": "Location Update Interval (minutes)",
+                    "low_battery_threshold": "Low Battery Threshold (%)",
+                    "enable_low_battery_polling": "Maintain default update frequency on low battery",
+                    "low_battery_interval": "Low Battery Update Interval (minutes)",
+                    "enable_active_locate": "Enable Active Location (trigger Xiaomi Cloud real-time locate)",
+                    "gaode_api_key": "Gaode (Amap) API Key",
+                    "enable_gaode_more_info": "Show Gaode Map in device details (requires gaode_maps)"
                 }
             }
         }

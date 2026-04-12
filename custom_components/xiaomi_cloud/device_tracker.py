@@ -1,220 +1,253 @@
-"""Support for the Xiaomi device tracking."""
+"""设备追踪器平台 — 读取后端 /sync 协议数据。"""
 import logging
+from collections import Counter
 
-from homeassistant.components.device_tracker.config_entry import SourceType
-from homeassistant.components.device_tracker.config_entry import TrackerEntity
+from homeassistant.core import callback
+from homeassistant.components.device_tracker.config_entry import SourceType, TrackerEntity
 from homeassistant.helpers.restore_state import RestoreEntity
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import Entity
-from homeassistant.helpers.device_registry import DeviceEntryType
 
 from .const import (
     DOMAIN,
     COORDINATOR,
-    SIGNAL_STATE_UPDATED
+    CONF_ENABLE_GAODE_MORE_INFO,
+    DEFAULT_ENABLE_GAODE_MORE_INFO,
 )
-
 
 _LOGGER = logging.getLogger(__name__)
 
-async def async_setup_entry(hass: HomeAssistant, config_entry, async_add_entities):
-    """Configure a dispatcher connection based on a config entry."""
+# 模块级标记：gaode_maps 缺失警告只打一次
+_gaode_warning_logged = False
 
+
+def _get_devices(coordinator) -> list:
+    if not coordinator.data or not isinstance(coordinator.data, dict):
+        return []
+    return coordinator.data.get("devices") or []
+
+
+def _compute_bases(devs: list) -> dict:
+    """统计每个型号 slug 出现次数，用于判断是否需要加后缀。"""
+    import re
+    slugs = []
+    for dev in devs:
+        if not dev.get("device_id"):
+            continue
+        raw = dev.get("name", "") or dev.get("model", "") or ""
+        text = re.sub(r'[^a-z0-9]+', '_', raw.lower().strip())
+        text = re.sub(r'_+', '_', text).strip('_')
+        if not text:
+            text = dev["device_id"][:6].lower()
+        if not text.startswith("xiaomi_"):
+            text = f"xiaomi_{text}"
+        slugs.append(text)
+    return Counter(slugs)
+
+
+def _make_slug(raw_name: str, device_id: str, bases: dict) -> str:
+    """生成 xiaomi_ 前缀的 slug，重复型号追加设备 ID 后4位。"""
+    import re
+    text = raw_name.lower().strip() if raw_name else ""
+    text = re.sub(r'[^a-z0-9]+', '_', text)
+    text = re.sub(r'_+', '_', text).strip('_')
+    if not text:
+        text = device_id[:6].lower() if len(device_id) >= 6 else device_id.lower()
+    if not text.startswith("xiaomi_"):
+        text = f"xiaomi_{text}"
+    if bases.get(text, 0) > 1:
+        sfx = device_id[-4:] if len(device_id) >= 4 else device_id
+        text = f"{text}_{sfx}"
+    return text
+
+
+async def async_setup_entry(hass, config_entry, async_add_entities):
     coordinator = hass.data[DOMAIN][config_entry.entry_id][COORDINATOR]
-    devices = []
-    
-    # Check if coordinator has valid data
-    if not coordinator.data or not isinstance(coordinator.data, list) or len(coordinator.data) == 0:
-        _LOGGER.debug("No device data available yet. Device will be set up when data becomes available.")
+    entry_id    = config_entry.entry_id
+
+    def _create_trackers(devs):
+        bases = _compute_bases(devs)
+        return [
+            XiaomiDeviceTracker(
+                coordinator,
+                dev["device_id"],
+                _make_slug(dev.get("name", "") or dev.get("model", ""), dev["device_id"], bases),
+                config_entry,
+            )
+            for dev in devs
+            if dev.get("device_id")
+        ]
+
+    devices_data = _get_devices(coordinator)
+    if devices_data:
+        entities = _create_trackers(devices_data)
+        _LOGGER.info("创建 %d 个设备追踪器", len(entities))
+        async_add_entities(entities, False)
+        hass.data[DOMAIN][entry_id]["device_tracker_entities_created"] = True
         return
-        
-    for i in range(len(coordinator.data)):
-        devices.append(XiaomiDeviceEntity(hass, coordinator, i))
-        _LOGGER.debug("device is : %s", i)
-    
-    async_add_entities(devices, True)
 
-class XiaomiDeviceEntity(TrackerEntity, RestoreEntity, Entity):
-    """Represent a tracked device."""
+    _LOGGER.debug("数据未就绪，注册监听器等待设备数据")
 
-    def __init__(self, hass, coordinator, vin) -> None:
-        """Set up Geofency entity."""
-        self._hass = hass
-        self._vin = vin
-        self.coordinator = coordinator  
-        self._unique_id = coordinator.data[vin]["imei"]    
-        
-        # Format model name to create entity ID in the desired format
-        model = coordinator.data[vin]["model"]
-        if model:
-            # Remove spaces and replace with underscores, remove special characters
-            formatted_model = model.replace(" ", "_").lower()
-            self._name = formatted_model
-        else:
-            self._name = f"xiaomi_device_{vin}"
-            
-        self._icon = "mdi:map-marker"
-        self.sw_version = coordinator.data[vin]["version"]
-        self._last_lat = coordinator.data[vin].get("device_lat")
-        self._last_lon = coordinator.data[vin].get("device_lon")
-        self._last_accuracy = coordinator.data[vin].get("device_accuracy")
-        self._last_update_time = coordinator.data[vin].get("device_location_update_time")
-        self._last_coordinate_type = coordinator.data[vin].get("coordinate_type")
-        self._last_device_phone = coordinator.data[vin].get("device_phone")
+    @callback
+    def _on_data_available():
+        entry_data = hass.data.get(DOMAIN, {}).get(entry_id)
+        if entry_data is None:
+            return
+        if entry_data.get("device_tracker_entities_created"):
+            return
+        devs = _get_devices(coordinator)
+        if not devs:
+            return
+        entry_data["device_tracker_entities_created"] = True
+        entities = _create_trackers(devs)
+        _LOGGER.info("创建 %d 个设备追踪器", len(entities))
+        async_add_entities(entities, False)
 
-    async def async_update(self):
-        """Update Colorfulclouds entity."""   
-        _LOGGER.debug("async_update")
-        await self.coordinator.async_request_refresh()
-    async def async_added_to_hass(self):
-        """Subscribe for update from the hub"""
+    config_entry.async_on_unload(
+        coordinator.async_add_listener(_on_data_available)
+    )
 
-        _LOGGER.debug("device_tracker_unique_id: %s", self._unique_id)
 
-        async def async_update_state():
-            """Update sensor state."""
-            await self.async_update_ha_state(True)
+class XiaomiDeviceTracker(TrackerEntity, RestoreEntity):
 
-        self.async_on_remove(
-            self.coordinator.async_add_listener(self.async_write_ha_state)
+    _attr_has_entity_name = True
+    _attr_name = None  # 实体友好名直接用设备名（如 "Redmi K40S"）
+
+    def __init__(self, coordinator, device_id: str, slug: str, config_entry):
+        self.coordinator    = coordinator
+        self._device_id     = device_id
+        self._entry         = config_entry
+        self._attr_unique_id             = f"{DOMAIN}:{device_id}"
+        self._attr_suggested_object_id   = slug
+        self._slug          = slug
+
+        # 缓存上次有效值（断线时保持最后位置）
+        self._last_lat      = None
+        self._last_lon      = None
+        self._last_accuracy = None
+
+        dev = self._get_dev()
+        self._friendly_name = (dev.get("name", "") or dev.get("model", "")) if dev else device_id
+
+    def _get_dev(self) -> dict | None:
+        for d in _get_devices(self.coordinator):
+            if d.get("device_id") == self._device_id:
+                return d
+        return None
+
+    @property
+    def source_type(self) -> SourceType:
+        return SourceType.GPS
+
+    @property
+    def latitude(self) -> float | None:
+        dev = self._get_dev()
+        if not dev:
+            return self._last_lat
+        lat = dev.get("latitude")
+        if lat is not None:
+            self._last_lat = lat
+        return self._last_lat
+
+    @property
+    def longitude(self) -> float | None:
+        dev = self._get_dev()
+        if not dev:
+            return self._last_lon
+        lon = dev.get("longitude")
+        if lon is not None:
+            self._last_lon = lon
+        return self._last_lon
+
+    @property
+    def location_accuracy(self) -> int:
+        dev = self._get_dev()
+        if not dev:
+            return self._last_accuracy or 0
+        acc = dev.get("accuracy")
+        if acc is not None:
+            self._last_accuracy = int(acc)
+        return self._last_accuracy or 0
+
+    @property
+    def battery_level(self) -> int | None:
+        dev = self._get_dev()
+        return dev.get("battery") if dev else None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        global _gaode_warning_logged
+
+        dev   = self._get_dev() or {}
+        attrs = {
+            "device_id":      self._device_id,
+            "friendly_name":  self._friendly_name,
+            "fix_time":       dev.get("fix_time"),
+            "locate_time":    dev.get("locate_time") or dev.get("ts"),
+            "coord_type":     dev.get("coord_type"),
+            "online":         dev.get("online"),
+            "stale":          dev.get("stale", False),
+            "stale_reason":   dev.get("stale_reason", ""),
+            "address":        dev.get("address", ""),
+            "wgs84_latitude":  dev.get("latitude"),
+            "wgs84_longitude": dev.get("longitude"),
+        }
+
+        gcj02_lat = dev.get("gcj02_lat")
+        gcj02_lon = dev.get("gcj02_lon")
+        if gcj02_lat is not None and gcj02_lon is not None:
+            attrs["gaode_latitude"]  = gcj02_lat
+            attrs["gaode_longitude"] = gcj02_lon
+
+        if dev.get("raw_coord_type"):
+            attrs["raw_coord_type"] = dev.get("raw_coord_type")
+            attrs["raw_lat"]        = dev.get("raw_lat")
+            attrs["raw_lon"]        = dev.get("raw_lon")
+
+        enable_gaode = self._entry.options.get(
+            CONF_ENABLE_GAODE_MORE_INFO,
+            self._entry.data.get(CONF_ENABLE_GAODE_MORE_INFO, DEFAULT_ENABLE_GAODE_MORE_INFO),
         )
-        
-    @property
-    def battery_level(self):
-        """Return battery value of the device."""
-        data = self.coordinator.data
-        if not isinstance(data, list) or self._vin >= len(data):
-            _LOGGER.debug("coordinator.data is not a list or index is out of range: %s", data)
-            return None
-        return data[self._vin].get("device_power")
+        if enable_gaode:
+            # 无论是否安装都写 custom_ui_more_info，让 HA 前端尝试调用
+            attrs["custom_ui_more_info"] = "gaode-map"
 
-    @property
-    def device_state_attributes(self):
-        """Return device specific attributes."""
-        data = self.coordinator.data
-        if not isinstance(data, list) or self._vin >= len(data):
-            _LOGGER.debug("coordinator.data is not a list or index out of range: %s", data)
-            attrs = {}
-            if self._last_update_time:
-                attrs["last_update"] = self._last_update_time
-            if self._last_coordinate_type:
-                attrs["coordinate_type"] = self._last_coordinate_type
-            if self._last_device_phone:
-                attrs["device_phone"] = self._last_device_phone
-            attrs["imei"] = self._unique_id
-            return attrs
-            
-        device_data = data[self._vin]
-        attrs = {}
-        update_time = device_data.get("device_location_update_time")
-        if update_time:
-            attrs["last_update"] = update_time
-            self._last_update_time = update_time
-        
-        coordinate_type = device_data.get("coordinate_type")
-        if coordinate_type:
-            attrs["coordinate_type"] = coordinate_type
-            self._last_coordinate_type = coordinate_type
-            
-        device_phone = device_data.get("device_phone")
-        if device_phone:
-            attrs["device_phone"] = device_phone
-            self._last_device_phone = device_phone
-            
-        attrs["imei"] = device_data.get("imei", self._unique_id)
+            gaode_installed = "gaode_maps" in self.hass.config.components
+            if gaode_installed:
+                attrs["gaode_maps_status"] = "ok"
+            else:
+                attrs["gaode_maps_status"] = "missing"
+                attrs["gaode_maps_hint"]   = "请在 HACS 安装 gaode_maps 并重启"
+                if not _gaode_warning_logged:
+                    _gaode_warning_logged = True
+                    _LOGGER.warning(
+                        "已启用高德地图 more-info，但未检测到 gaode_maps 组件，"
+                        "请在 HACS 安装 gaode_maps 后重启 HA"
+                    )
 
         return attrs
 
     @property
-    def latitude(self):
-        """Return latitude value of the device."""
-        data = self.coordinator.data
-        if not isinstance(data, list) or self._vin >= len(data):
-            _LOGGER.debug("coordinator.data is not list or index out of range: %s", data)
-            return self._last_lat
-
-        device_data = data[self._vin]
-        lat = device_data.get("device_lat")
-        if lat is None:
-            return self._last_lat
-        self._last_lat = lat
-        return lat
+    def icon(self) -> str:
+        return "mdi:map-marker"
 
     @property
-    def longitude(self):
-        """Return longitude value of the device."""
-        data = self.coordinator.data
-        if not isinstance(data, list) or self._vin >= len(data):
-            _LOGGER.debug("coordinator.data is not a list or index out of range: %s", data)
-            return self._last_lon
-
-        device_data = data[self._vin]
-        lon = device_data.get("device_lon")
-        if lon is None:
-            return self._last_lon
-        self._last_lon = lon
-        return lon
-
-    @property
-    def location_accuracy(self):
-        """Return the gps accuracy of the device."""
-        data = self.coordinator.data
-        if not isinstance(data, list) or self._vin >= len(data):
-            _LOGGER.debug("coordinator.data is not a list or index out of range: %s", data)
-            return self._last_accuracy
-            
-        accuracy = data[self._vin].get("device_accuracy")
-        if accuracy is not None:
-            self._last_accuracy = accuracy
-        return self._last_accuracy
-
-    @property
-    def icon(self):
-        """Icon to use in the frontend, if any."""
-        return self._icon
-
-    @property
-    def name(self):
-        """Return the name of the device."""
-        data = self.coordinator.data
-        if not isinstance(data, list) or self._vin >= len(data):
-            _LOGGER.debug("coordinator.data is not a list or index out of range: %s", data)
-            return self._name
-            
-        model = data[self._vin].get("model")
-        if model:
-            # Format model name according to requirements
-            formatted_model = model.replace(" ", "_").lower()
-            return formatted_model
-        return self._name
-
-    @property
-    def unique_id(self):
-        """Return the unique ID."""
-        return self._unique_id
-    
-    @property
-    def device_info(self):
-        """Return the device info."""
-        return {
-            "identifiers": {(DOMAIN, self._unique_id)},
-            "name": self._name,
-            "manufacturer": "Xiaomi",
-            "entry_type": DeviceEntryType.SERVICE, 
-            "sw_version": self.sw_version,
-            "model": self._name
-        }
-
-
-    @property
-    def should_poll(self):
-        """Return the polling requirement of the entity."""
+    def should_poll(self) -> bool:
         return False
 
     @property
-    def source_type(self):
-        """Return the source type, eg gps or router, of the device."""
-        return SourceType.GPS
+    def device_info(self) -> dict:
+        dev   = self._get_dev() or {}
+        model = dev.get("model") or dev.get("name") or self._device_id
+        return {
+            "identifiers":  {(DOMAIN, self._device_id)},
+            "name":         self._friendly_name or model,
+            "manufacturer": "Xiaomi",
+            "model":        model,
+        }
 
-        
+    async def async_added_to_hass(self):
+        self.async_on_remove(
+            self.coordinator.async_add_listener(self.async_write_ha_state)
+        )
 
+    async def async_update(self):
+        await self.coordinator.async_request_refresh()

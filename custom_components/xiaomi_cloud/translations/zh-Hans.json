@@ -3,31 +3,44 @@
         "title": "小米云服务",
         "step": {
             "user": {
-                "title": "小米云服务",
-                "description": "如果您需要配置方面的帮助，请查看此处: https://github.com/MagicStarTrace/xiaomi-cloud",
+                "title": "小米云服务配置",
+                "description": "请配置小米云服务连接信息\n\n如果您需要配置方面的帮助，请查看此处：\nhttps://github.com/MagicStarTrace/xiaomi_cloud",
                 "data": {
-                    "password": "密码",
-                    "username": "账号"
+                    "endpoint": "Playwright服务地址",
+                    "username": "小米账号",
+                    "password": "小米密码",
+                    "gaode_api_key": "高德API密钥",
+                    "enable_gaode_more_info": "在设备详情页显示高德地图（需安装 gaode_maps）"
                 }
             }
         },
         "error": {
-            "get_sign_failed": "获得Sign失败",
-            "login_url_failed": "登录失败",
-            "login_mi_cloud_failed": "登录小米云失败",
-            "get_device_failed": "没有找到设备"
+            "already_configured": "该账号已重复配置.",
+            "base_url_required": "Playwright服务地址不能为空",
+            "invalid_url": "Playwright服务地址格式不正确，必须以 http:// 或 https:// 开头",
+            "username_required": "小米账号不能为空",
+            "password_required": "小米密码不能为空"
         },
         "abort": {
-            "single_instance_allowed": "仅允许单个配置.",
-            "already_configured": "请勿重复配置."
+            "already_configured": "该账号已重复配置."
         }
     },
     "options": {
         "step": {
-            "user": {
+            "init": {
+                "title": "小米云服务选项",
+                "description": "配置获取定位的时间间隔和高德API\n\n如果您需要配置方面的帮助，请查看此处：\nhttps://github.com/MagicStarTrace/xiaomi_cloud",
                 "data": {
-                    "scan_interval": "位置更新时间间隔",
-                    "coordinate_type": "坐标体系"
+                    "endpoint": "Playwright服务地址",
+                    "username": "小米账号",
+                    "password": "小米密码",
+                    "update_interval": "位置更新间隔(分钟)",
+                    "low_battery_threshold": "低电量阈值(%)",
+                    "enable_low_battery_polling": "低电量时保持默认更新频率",
+                    "low_battery_interval": "低电量更新间隔(分钟)",
+                    "enable_active_locate": "启用主动定位（触发小米云实时定位）",
+                    "gaode_api_key": "高德API密钥",
+                    "enable_gaode_more_info": "在设备详情页显示高德地图（需安装 gaode_maps）"
                 }
             }
         }
