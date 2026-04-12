@@ -1,8 +1,8 @@
-# 小米云服务集成 for Home Assistant
+# 小米云 GPS 同步服务（Home Assistant 定位集成）
 
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Docker](https://img.shields.io/badge/Docker-xiaomi--location--bridge-2496ED?logo=docker&logoColor=white)](https://hub.docker.com/r/magicstartrace/xiaomi-location-bridge)
-[![HACS](https://img.shields.io/badge/HACS-自定义集成-orange.svg)](https://hacs.xyz/)
+本项目用于将小米云"查找设备"的定位能力接入 Home Assistant / Node-RED，实现围栏、回家自动化、电量提醒等场景。
+
+很多手机定位方案死在"电源管理（省电杀后台）"，本项目通过小米云空间「查找设备」从云端获取位置，绕开本地后台限制，让回家/离家围栏自动化更稳定。
 
 > 通过小米云空间"查找设备"功能，将小米手机的 GPS 位置、电量等信息接入 Home Assistant。
 
@@ -11,7 +11,7 @@
 **基础能力**
 
 - 在 HA 地图上实时查看你的小米设备位置
-- 监控设备电量，低电量时自动加速更新
+- 监控设备电量，低电量时自动降低更新频率
 - 显示设备所在的中文地址（需配置高德 API）
 - 支持多设备同时追踪
 - 在设备详情页显示高德地图（需安装 [gaode_maps](https://github.com/dscao/gaode_maps)）
@@ -48,11 +48,22 @@ Home Assistant ←→ 后端服务（Docker）←→ 小米云空间
 
 ### 第一步：部署后端服务
 
+## 部署建议
+
+本项目涉及小米账号登录凭据，**强烈建议部署在内网环境**，不要将后端服务暴露到公网。典型的安全部署方式：
+
+- 后端服务运行在家庭局域网内的 NAS、软路由或 Home Assistant 同一主机上
+- HA 通过内网 IP（如 `http://192.168.1.100:8000`）访问后端，无需端口映射到公网
+- 如确需远程访问，请通过 VPN 或 Tailscale/ZeroTier 等内网穿透方案，避免直接暴露端口
+- 不要在 VPN（科学上网）环境部署
+
 ```bash
 # 国内用户（阿里云镜像）
 docker run -d \
   --name xiaomi-location-bridge \
   -p 8000:8080 \
+  -v /etc/localtime:/etc/localtime:ro \
+  -e TZ=Asia/Shanghai \
   --restart unless-stopped \
   registry.cn-hangzhou.aliyuncs.com/magicstartrace/xiaomi-location-bridge:latest
 
@@ -60,6 +71,8 @@ docker run -d \
 docker run -d \
   --name xiaomi-location-bridge \
   -p 8000:8080 \
+  -v /etc/localtime:/etc/localtime:ro \
+  -e TZ=Asia/Shanghai \
   --restart unless-stopped \
   magicstartrace/xiaomi-location-bridge:latest
 
@@ -68,6 +81,8 @@ docker run -d \
   --name xiaomi-location-bridge \
   -p 8000:8080 \
   --env-file .env \
+  -v /etc/localtime:/etc/localtime:ro \
+  -e TZ=Asia/Shanghai \
   --restart unless-stopped \
   magicstartrace/xiaomi-location-bridge:latest
 ```
@@ -107,13 +122,9 @@ curl http://你的服务器IP:8000/health
 3. 填写：
    - **后端服务地址**：如 `http://192.168.1.100:8000`
    - **小米账号** / **密码**
-   - **高德 API 密钥**（可选，[申请方式见下方](#地址不显示)）
+   - **高德 API 密钥**（可选，申请方式见下方）
 
-<div align="center">
-  <img src="screenshots/Add-Integration.jpg" width="700">
-  <br>
-  <sub>在 HA 中添加集成并填写后端地址与高德 API</sub>
-</div>
+![在 HA 中添加集成并填写后端地址与高德 API](screenshots/Add-Integration.jpg)
 
 ### 第四步：等待初始化
 
@@ -129,17 +140,9 @@ curl http://你的服务器IP:8000/health
 
 > **首次添加需要 30-60 秒等待后端登录**，这是正常的。看到"服务状态"显示"登录中"说明一切正常，请耐心等待。
 
-<div align="center">
-  <img src="screenshots/Initialisation-log.jpg" width="700">
-  <br>
-  <sub>初始化过程中的日志输出</sub>
-</div>
+![初始化过程中的日志输出](screenshots/Initialisation-log.jpg)
 
-<div align="center">
-  <img src="screenshots/User-Added.jpg" width="700">
-  <br>
-  <sub>登录成功后自动出现的设备实体</sub>
-</div>
+![登录成功后自动出现的设备实体](screenshots/User-Added.jpg)
 
 ## 创建的实体
 
@@ -153,6 +156,8 @@ curl http://你的服务器IP:8000/health
 | 找手机 | 开关（switch） | 触发设备响铃的开关形式；点击后自动复位回关闭状态，同一设备 30 秒内只能触发一次 |
 
 每台小米设备会创建 1 个追踪器 + 2 个传感器（地址、电量）+ 1 个响铃按钮 + 1 个找手机开关，共 5 个实体。
+
+![集成设备页面概览](screenshots/Plugin-Interface.jpg)
 
 > **找手机开关与响铃按钮的区别**：两者底层调用相同的 API，区别在于实体类型不同。按钮（Button）在 HA 自动化中作为"触发条件"更直观；开关（Switch）则方便通过第三方平台（如 HomeKit、Google Home、小爱同学等）语音控制响铃。根据使用习惯选择即可，两者功能等价。
 
@@ -180,7 +185,7 @@ curl http://你的服务器IP:8000/health
 
 ### 服务状态显示"需要认证"
 
-小米账号触发了验证码或二步验证，后端无法自动处理。解决方法：
+小米账号触发了验证码或二步验证（多数情况下不会），后端无法自动处理。解决方法：
 1. 查看 Docker 容器日志，确认具体错误
 2. 在浏览器中手动访问 [i.mi.com](https://i.mi.com) 并完成验证
 3. 在 HA 中重新加载集成
@@ -197,8 +202,14 @@ curl http://你的服务器IP:8000/health
 
 1. 注册/登录 [高德开放平台](https://lbs.amap.com/)
 2. 进入 **应用管理 → 我的应用 → 创建新应用**
+
+![进入「应用管理 → 我的应用 → 创建新应用」](screenshots/Amap-Create-Application.jpg)
+
 3. 应用类型选择 **出行**
 4. 点击 **添加 Key**，服务平台选择 **Web 服务**
+
+![选择「出行」类型并添加 Web 服务 Key](screenshots/Amap-web-service-config.jpg)
+
 5. 将获取到的 Key 填入集成配置的「高德 API 密钥」字段
 
 ### 定位不准确
@@ -217,17 +228,9 @@ curl http://你的服务器IP:8000/health
 - 设备追踪器的位置已自动转换为 WGS-84
 - 如需国内地图坐标（高德/腾讯），可在实体属性中找到 `gaode_latitude` / `gaode_longitude`
 
-<div align="center">
-  <img src="screenshots/WGS84toGCJ-02-resolved-address-entities.jpg" width="700">
-  <br>
-  <sub>坐标转换后的中文地址实体展示</sub>
-</div>
+![坐标转换后的中文地址实体展示](screenshots/WGS84toGCJ-02-resolved-address-entities.jpg)
 
-<div align="center">
-  <img src="screenshots/Muran-map.jpg" width="700">
-  <br>
-  <sub>在 HA 地图卡片上显示设备位置</sub>
-</div>
+![在 HA 地图卡片上显示设备位置](screenshots/Muran-map.jpg)
 
 ## 后端行为说明
 
@@ -265,8 +268,11 @@ curl http://你的服务器IP:8000/health
 
 ## 💬 交流与反馈
 
-- 优先使用 GitHub Issues：适合 Bug / 功能建议 / 适配问题（请附日志与截图，便于定位）
-- QQ 交流群：**1081967118**（日常交流、使用心得、公告通知）
+如果本项目对你有帮助，欢迎在 GitHub 上点个 Star 支持一下。
+
+- GitHub 仓库：https://github.com/MagicStarTrace/xiaomi_cloud
+- GitHub Issues：适合 Bug 反馈、功能建议、适配问题（请附日志与截图，便于定位）
+- QQ 交流群：**1079239188**（日常交流、使用心得、公告通知）
 
 ## 免责声明
 
