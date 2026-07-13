@@ -45,6 +45,7 @@ class XiaomiCloudDataUpdateCoordinator(DataUpdateCoordinator):
         self._fast_retry_count = 0
         self._fast_retry_task: asyncio.Task = None
         self._current_interval_minutes = update_interval_minutes
+        self._max_movement_speed_kmh: float | None = None
         self._movement_samples: dict[str, dict] = {}
 
         # 逆地理编码缓存：device_id -> {lat, lng, address, timestamp}
@@ -264,6 +265,7 @@ class XiaomiCloudDataUpdateCoordinator(DataUpdateCoordinator):
             if (speed := self._device_speed_kmh(device)) is not None
         ]
         max_speed = max(speeds) if speeds else None
+        self._max_movement_speed_kmh = max_speed
 
         if max_speed is None:
             target = MOVEMENT_MEDIUM_INTERVAL
@@ -285,6 +287,16 @@ class XiaomiCloudDataUpdateCoordinator(DataUpdateCoordinator):
                 target,
                 f"{max_speed:.2f}" if max_speed is not None else "未知",
             )
+
+    @property
+    def current_interval_minutes(self) -> int:
+        """当前生效的定位检测间隔。"""
+        return self._current_interval_minutes
+
+    @property
+    def max_movement_speed_kmh(self) -> float | None:
+        """最近一次轮询中所有设备的最高移动速度。"""
+        return self._max_movement_speed_kmh
 
     # ──────────────────────────────────────────────
     # 高德逆地理编码

@@ -6,7 +6,15 @@ from homeassistant.core import callback
 from homeassistant.components.sensor import SensorEntity, SensorDeviceClass
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, COORDINATOR
+from .const import (
+    DOMAIN,
+    COORDINATOR,
+    MOVEMENT_FAST_INTERVAL,
+    MOVEMENT_MEDIUM_INTERVAL,
+    MOVEMENT_SLOW_INTERVAL,
+    MOVEMENT_FAST_SPEED_KMH,
+    MOVEMENT_MEDIUM_SPEED_KMH,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -15,8 +23,11 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     coordinator = hass.data[DOMAIN][config_entry.entry_id][COORDINATOR]
     entry_id    = config_entry.entry_id
 
-    # 服务状态传感器立即创建，不依赖设备数据
-    async_add_entities([ServiceStatusSensor(coordinator, entry_id)], False)
+    # 服务级传感器立即创建，不依赖设备数据
+    async_add_entities([
+        ServiceStatusSensor(coordinator, entry_id),
+        PollingIntervalSensor(coordinator, entry_id),
+    ], False)
 
     def _create_sensors(devs):
         return _build_sensors(coordinator, devs, config_entry)
@@ -167,6 +178,53 @@ class ServiceStatusSensor(CoordinatorEntity, SensorEntity):
         if reason in ("NO_SESSION", "LOGIN_IN_PROGRESS") or code == 990:
             attrs["hint"] = "后台正在登录小米账号，请耐心等待30-60秒"
         return attrs
+
+
+class PollingIntervalSensor(CoordinatorEntity, SensorEntity):
+    """显示当前按移动速度动态调整后的检测间隔。"""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:speedometer"
+    _attr_device_class = SensorDeviceClass.DURATION
+    _attr_native_unit_of_measurement = "min"
+
+    def __init__(self, coordinator, entry_id: str):
+        super().__init__(coordinator)
+        self._entry_id = entry_id
+        self._attr_unique_id = f"{DOMAIN}:{entry_id}:polling_interval"
+        self._attr_suggested_object_id = "xiaomi_cloud_polling_interval"
+        self._attr_name = "检测频率"
+
+    @property
+    def device_info(self) -> dict:
+        return {
+            "identifiers": {(DOMAIN, self._entry_id)},
+            "name": "Xiaomi Cloud",
+            "manufacturer": "Xiaomi",
+            "model": "Cloud Service",
+        }
+
+    @property
+    def native_value(self) -> int:
+        return self.coordinator.current_interval_minutes
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        interval = self.coordinator.current_interval_minutes
+        level = {
+            MOVEMENT_FAST_INTERVAL: "最快",
+            MOVEMENT_MEDIUM_INTERVAL: "中等",
+            MOVEMENT_SLOW_INTERVAL: "最慢",
+        }.get(interval, "未知")
+        max_speed = self.coordinator.max_movement_speed_kmh
+        return {
+            "level": level,
+            "max_movement_speed_kmh": (
+                round(max_speed, 2) if max_speed is not None else None
+            ),
+            "fast_threshold_kmh": MOVEMENT_FAST_SPEED_KMH,
+            "medium_threshold_kmh": MOVEMENT_MEDIUM_SPEED_KMH,
+        }
 
 
 class DeviceAddressSensor(SensorEntity):
