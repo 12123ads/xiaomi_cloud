@@ -3,6 +3,7 @@ import asyncio
 import datetime
 import hashlib
 import logging
+import math
 
 import aiohttp
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -13,14 +14,11 @@ from .const import (
     FAST_RETRY_DEFAULT_SECONDS,
     FAST_RETRY_MAX,
     CONF_GAODE_APIKEY,
-    CONF_LOW_BATTERY_POLLING,
-    CONF_LOW_BATTERY_THRESHOLD,
-    CONF_LOW_BATTERY_INTERVAL,
-    DEFAULT_LOW_BATTERY_POLLING,
-    DEFAULT_LOW_BATTERY_THRESHOLD,
-    DEFAULT_LOW_BATTERY_INTERVAL,
-    CONF_UPDATE_INTERVAL,
-    DEFAULT_UPDATE_INTERVAL,
+    MOVEMENT_FAST_INTERVAL,
+    MOVEMENT_MEDIUM_INTERVAL,
+    MOVEMENT_SLOW_INTERVAL,
+    MOVEMENT_MEDIUM_SPEED_KMH,
+    MOVEMENT_FAST_SPEED_KMH,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -47,6 +45,7 @@ class XiaomiCloudDataUpdateCoordinator(DataUpdateCoordinator):
         self._fast_retry_count = 0
         self._fast_retry_task: asyncio.Task = None
         self._current_interval_minutes = update_interval_minutes
+        self._movement_samples: dict[str, dict] = {}
 
         # 逆地理编码缓存：device_id -> {lat, lng, address, timestamp}
         self._geocode_cache: dict = {}
@@ -125,7 +124,7 @@ class XiaomiCloudDataUpdateCoordinator(DataUpdateCoordinator):
 
         devices = data.get("devices") or []
 
-        # 动态低电量间隔调整
+        # 根据所有定位实体中最快的移动速度动态调整轮询间隔
         if devices:
             self._update_interval_dynamically(devices)
 
@@ -193,40 +192,99 @@ class XiaomiCloudDataUpdateCoordinator(DataUpdateCoordinator):
         return {"code": code, "reason": reason, "ok": False, "devices": []}
 
     # ──────────────────────────────────────────────
-    # 低电量动态轮询间隔
+    # 基于移动速度的三档动态轮询间隔
     # ──────────────────────────────────────────────
 
-    def _get_entry(self):
-        return self.hass.config_entries.async_get_entry(self._config_entry_id)
+    @staticmethod
+    def _distance_metres(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        """使用 Haversine 公式计算两点间距离。"""
+        radius = 6_371_000
+        lat1_rad = math.radians(lat1)
+        lat2_rad = math.radians(lat2)
+        delta_lat = math.radians(lat2 - lat1)
+        delta_lon = math.radians(lon2 - lon1)
+        value = (
+            math.sin(delta_lat / 2) ** 2
+            + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(delta_lon / 2) ** 2
+        )
+        value = min(max(value, 0.0), 1.0)
+        return radius * 2 * math.atan2(math.sqrt(value), math.sqrt(1 - value))
 
-    def _should_use_low_battery_interval(self, devices: list) -> bool:
-        """是否应切换到低电量快速间隔（勾选"保持默认"时不切换）。"""
-        entry = self._get_entry()
-        if entry and entry.options.get(CONF_LOW_BATTERY_POLLING, DEFAULT_LOW_BATTERY_POLLING):
-            return False  # 勾选了"保持默认" → 不加速
-        threshold = (entry.options.get(CONF_LOW_BATTERY_THRESHOLD, DEFAULT_LOW_BATTERY_THRESHOLD)
-                     if entry else DEFAULT_LOW_BATTERY_THRESHOLD)
-        for dev in devices:
-            battery = dev.get("battery")
-            if battery is not None:
-                try:
-                    if int(battery) < threshold:
-                        return True
-                except (ValueError, TypeError):
-                    pass
-        return False
+    def _device_speed_kmh(self, device: dict) -> float | None:
+        """根据相邻两次有效定位计算速度，并过滤定位精度范围内的漂移。"""
+        device_id = device.get("device_id")
+        lat = device.get("latitude")
+        lon = device.get("longitude")
+        timestamp = device.get("locate_time") or device.get("ts")
+        if not device_id or lat is None or lon is None or timestamp is None or device.get("stale"):
+            return None
+
+        try:
+            lat = float(lat)
+            lon = float(lon)
+            timestamp = int(timestamp)
+            accuracy = max(float(device.get("accuracy") or 0), 0)
+        except (TypeError, ValueError):
+            return None
+
+        previous = self._movement_samples.get(device_id)
+        if previous and timestamp <= previous["timestamp"]:
+            speed = previous.get("speed_kmh")
+            if speed is not None:
+                device["movement_speed_kmh"] = round(speed, 2)
+            return speed
+
+        speed = None
+        if previous:
+            elapsed_seconds = timestamp - previous["timestamp"]
+            distance_metres = self._distance_metres(
+                previous["lat"], previous["lon"], lat, lon
+            )
+            noise_radius = max(accuracy, previous["accuracy"], 30.0)
+            if distance_metres <= noise_radius:
+                speed = 0.0
+            elif elapsed_seconds > 0:
+                speed = distance_metres / elapsed_seconds * 3.6
+
+        self._movement_samples[device_id] = {
+            "lat": lat,
+            "lon": lon,
+            "timestamp": timestamp,
+            "accuracy": accuracy,
+            "speed_kmh": speed,
+        }
+        if speed is not None:
+            device["movement_speed_kmh"] = round(speed, 2)
+        return speed
 
     def _update_interval_dynamically(self, devices: list) -> None:
-        entry = self._get_entry()
-        normal = (entry.options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
-                  if entry else DEFAULT_UPDATE_INTERVAL)
-        low_batt = (entry.options.get(CONF_LOW_BATTERY_INTERVAL, DEFAULT_LOW_BATTERY_INTERVAL)
-                    if entry else DEFAULT_LOW_BATTERY_INTERVAL)
-        target = low_batt if self._should_use_low_battery_interval(devices) else normal
+        speeds = [
+            speed
+            for device in devices
+            if (speed := self._device_speed_kmh(device)) is not None
+        ]
+        max_speed = max(speeds) if speeds else None
+
+        if max_speed is None:
+            target = MOVEMENT_MEDIUM_INTERVAL
+        elif max_speed >= MOVEMENT_FAST_SPEED_KMH:
+            target = MOVEMENT_FAST_INTERVAL
+        elif max_speed >= MOVEMENT_MEDIUM_SPEED_KMH:
+            target = MOVEMENT_MEDIUM_INTERVAL
+        else:
+            target = MOVEMENT_SLOW_INTERVAL
+
+        for device in devices:
+            device["polling_interval_minutes"] = target
+
         if target != self._current_interval_minutes:
             self._current_interval_minutes = target
             self.update_interval = datetime.timedelta(minutes=target)
-            _LOGGER.info("轮询间隔动态调整为 %d 分钟", target)
+            _LOGGER.info(
+                "根据实体移动速度动态调整轮询间隔为 %d 分钟（最高速度=%s km/h）",
+                target,
+                f"{max_speed:.2f}" if max_speed is not None else "未知",
+            )
 
     # ──────────────────────────────────────────────
     # 高德逆地理编码

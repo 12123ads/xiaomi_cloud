@@ -29,15 +29,11 @@
         "step": {
             "init": {
                 "title": "小米云服务选项",
-                "description": "配置获取定位的时间间隔和高德API\n\n如果您需要配置方面的帮助，请查看此处：\nhttps://github.com/MagicStarTrace/xiaomi_cloud",
+                "description": "定位检测频率会根据实体移动速度自动切换：1、5、10 分钟三档。\n\n如果您需要配置方面的帮助，请查看此处：\nhttps://github.com/MagicStarTrace/xiaomi_cloud",
                 "data": {
                     "endpoint": "Playwright服务地址",
                     "username": "小米账号",
                     "password": "小米密码",
-                    "update_interval": "位置更新间隔(分钟)",
-                    "low_battery_threshold": "低电量阈值(%)",
-                    "enable_low_battery_polling": "低电量时保持默认更新频率",
-                    "low_battery_interval": "低电量更新间隔(分钟)",
                     "enable_active_locate": "启用主动定位（触发小米云实时定位）",
                     "gaode_api_key": "高德API密钥",
                     "enable_gaode_more_info": "在设备详情页显示高德地图（需安装 gaode_maps）"

@@ -29,15 +29,11 @@
         "step": {
             "init": {
                 "title": "Xiaomi Cloud Options",
-                "description": "Configure location polling intervals and Gaode API.\n\nFor help with deployment, see:\nhttps://github.com/MagicStarTrace/xiaomi_cloud",
+                "description": "Location polling automatically switches between 1, 5, and 10 minutes based on entity movement speed.\n\nFor help with deployment, see:\nhttps://github.com/MagicStarTrace/xiaomi_cloud",
                 "data": {
                     "endpoint": "Playwright Service URL",
                     "username": "Xiaomi Account",
                     "password": "Xiaomi Password",
-                    "update_interval": "Location Update Interval (minutes)",
-                    "low_battery_threshold": "Low Battery Threshold (%)",
-                    "enable_low_battery_polling": "Maintain default update frequency on low battery",
-                    "low_battery_interval": "Low Battery Update Interval (minutes)",
                     "enable_active_locate": "Enable Active Location (trigger Xiaomi Cloud real-time locate)",
                     "gaode_api_key": "Gaode (Amap) API Key",
                     "enable_gaode_more_info": "Show Gaode Map in device details (requires gaode_maps)"
