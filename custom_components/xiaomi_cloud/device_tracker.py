@@ -187,8 +187,6 @@ class XiaomiDeviceTracker(TrackerEntity, RestoreEntity):
             "stale":          dev.get("stale", False),
             "stale_reason":   dev.get("stale_reason", ""),
             "address":        dev.get("address", ""),
-            "movement_speed_kmh": dev.get("movement_speed_kmh"),
-            "polling_interval_minutes": dev.get("polling_interval_minutes"),
             "wgs84_latitude":  dev.get("latitude"),
             "wgs84_longitude": dev.get("longitude"),
         }

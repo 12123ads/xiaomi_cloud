@@ -2,6 +2,12 @@
 
 import voluptuous as vol
 from homeassistant import config_entries
+import homeassistant.helpers.config_validation as cv
+from homeassistant.helpers.selector import (
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
+)
 
 def _mask_username(username: str) -> str:
     """脱敏用户名，手机号前3后4，其余前3."""
@@ -16,9 +22,17 @@ from .const import (
     DOMAIN,
     CONF_ENDPOINT,
     DEFAULT_ENDPOINT,
+    CONF_UPDATE_INTERVAL,
+    DEFAULT_UPDATE_INTERVAL,
     CONF_GAODE_APIKEY,
     CONF_ENABLE_GAODE_MORE_INFO,
     DEFAULT_ENABLE_GAODE_MORE_INFO,
+    CONF_LOW_BATTERY_POLLING,
+    DEFAULT_LOW_BATTERY_POLLING,
+    CONF_LOW_BATTERY_THRESHOLD,
+    DEFAULT_LOW_BATTERY_THRESHOLD,
+    CONF_LOW_BATTERY_INTERVAL,
+    DEFAULT_LOW_BATTERY_INTERVAL,
     CONF_ACTIVE_LOCATE,
     DEFAULT_ACTIVE_LOCATE,
 )
@@ -46,6 +60,7 @@ class XiaomiCloudConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     "username":                  username,
                     "password":                  user_input["password"],
                     CONF_ENDPOINT:               user_input.get(CONF_ENDPOINT, DEFAULT_ENDPOINT).strip().rstrip("/"),
+                    CONF_UPDATE_INTERVAL:        DEFAULT_UPDATE_INTERVAL,
                     CONF_GAODE_APIKEY:           user_input.get(CONF_GAODE_APIKEY, ""),
                     CONF_ENABLE_GAODE_MORE_INFO: user_input.get(CONF_ENABLE_GAODE_MORE_INFO, DEFAULT_ENABLE_GAODE_MORE_INFO),
                 },
@@ -81,6 +96,10 @@ class XiaomiCloudOptionsFlow(config_entries.OptionsFlow):
                 "username":                  user_input.get("username", self._config_entry.data.get("username", "")),
                 "password":                  user_input.get("password", self._config_entry.data.get("password", "")),
                 CONF_ENDPOINT:               user_input.get(CONF_ENDPOINT, self._get(CONF_ENDPOINT, DEFAULT_ENDPOINT)).strip().rstrip("/"),
+                CONF_UPDATE_INTERVAL:        int(user_input.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)),
+                CONF_LOW_BATTERY_THRESHOLD:  int(user_input.get(CONF_LOW_BATTERY_THRESHOLD, DEFAULT_LOW_BATTERY_THRESHOLD)),
+                CONF_LOW_BATTERY_POLLING:    user_input.get(CONF_LOW_BATTERY_POLLING, DEFAULT_LOW_BATTERY_POLLING),
+                CONF_LOW_BATTERY_INTERVAL:   int(user_input.get(CONF_LOW_BATTERY_INTERVAL, DEFAULT_LOW_BATTERY_INTERVAL)),
                 CONF_ACTIVE_LOCATE:          user_input.get(CONF_ACTIVE_LOCATE, DEFAULT_ACTIVE_LOCATE),
                 CONF_GAODE_APIKEY:           user_input.get(CONF_GAODE_APIKEY, ""),
                 CONF_ENABLE_GAODE_MORE_INFO: user_input.get(CONF_ENABLE_GAODE_MORE_INFO, DEFAULT_ENABLE_GAODE_MORE_INFO),
@@ -92,6 +111,31 @@ class XiaomiCloudOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional(CONF_ENDPOINT, default=self._get(CONF_ENDPOINT, DEFAULT_ENDPOINT)): str,
                 vol.Optional("username", default=self._config_entry.data.get("username", "")): str,
                 vol.Optional("password", default=self._config_entry.data.get("password", "")): str,
+                vol.Optional(
+                    CONF_UPDATE_INTERVAL,
+                    default=int(self._get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)),
+                ): NumberSelector(NumberSelectorConfig(
+                    min=1, max=60, step=1, mode=NumberSelectorMode.SLIDER,
+                    unit_of_measurement="min",
+                )),
+                vol.Optional(
+                    CONF_LOW_BATTERY_THRESHOLD,
+                    default=int(self._get(CONF_LOW_BATTERY_THRESHOLD, DEFAULT_LOW_BATTERY_THRESHOLD)),
+                ): NumberSelector(NumberSelectorConfig(
+                    min=10, max=90, step=5, mode=NumberSelectorMode.SLIDER,
+                    unit_of_measurement="%",
+                )),
+                vol.Optional(
+                    CONF_LOW_BATTERY_POLLING,
+                    default=self._get(CONF_LOW_BATTERY_POLLING, DEFAULT_LOW_BATTERY_POLLING),
+                ): bool,
+                vol.Optional(
+                    CONF_LOW_BATTERY_INTERVAL,
+                    default=int(self._get(CONF_LOW_BATTERY_INTERVAL, DEFAULT_LOW_BATTERY_INTERVAL)),
+                ): NumberSelector(NumberSelectorConfig(
+                    min=1, max=30, step=1, mode=NumberSelectorMode.SLIDER,
+                    unit_of_measurement="min",
+                )),
                 vol.Optional(
                     CONF_ACTIVE_LOCATE,
                     default=self._get(CONF_ACTIVE_LOCATE, DEFAULT_ACTIVE_LOCATE),

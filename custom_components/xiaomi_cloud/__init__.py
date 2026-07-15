@@ -17,7 +17,8 @@ from .const import (
     UNDO_UPDATE_LISTENER,
     CONF_ENDPOINT,
     DEFAULT_ENDPOINT,
-    MOVEMENT_MEDIUM_INTERVAL,
+    CONF_UPDATE_INTERVAL,
+    DEFAULT_UPDATE_INTERVAL,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -164,6 +165,10 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
     endpoint = config_entry.options.get(
         CONF_ENDPOINT, config_entry.data.get(CONF_ENDPOINT, DEFAULT_ENDPOINT),
     )
+    update_interval = config_entry.options.get(
+        CONF_UPDATE_INTERVAL, config_entry.data.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
+    )
+
     _LOGGER.info(
         "初始化小米云服务（后端代理模式），endpoint=%s，用户=%s",
         endpoint, _mask(username),
@@ -174,7 +179,7 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
         endpoint=endpoint,
         username=username,
         password=password,
-        update_interval_minutes=MOVEMENT_MEDIUM_INTERVAL,
+        update_interval_minutes=int(update_interval),
         config_entry_id=entry_id,
     )
 
